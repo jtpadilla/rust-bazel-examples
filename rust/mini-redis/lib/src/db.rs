@@ -6,21 +6,28 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use tracing::debug;
 
-/// A wrapper around a `Db` instance. This exists to allow orderly cleanup
-/// of the `Db` by signalling the background purge task to shut down when
-/// this struct is dropped.
+/// Un envoltorio alrededor de una instancia `Db`. 
+/// Su funcion es permitir la limpieza ordenada de `Db` al marcar que 
+/// la tarea de purga en segundo plano se cierre cuando se elimine esta estructura.
 #[derive(Debug)]
-pub(crate) struct DbDropGuard {
-    /// The `Db` instance that will be shut down when this `DbHolder` struct
-    /// is dropped.
+pub struct DbDropGuard {
+    /// La instancia de `Db` que sera desmontada cuando esta estructura 
+    /// `DbDropGuard` sea eliminada (dropped).
     db: Db,
 }
 
-/// Server state shared across all connections.
+/// Estado del servidor comportido con todas las conexiones.
+/// 
+/// 'Db' contiene en su interior un 'HashMap' que almacenando
+/// los key/value y tambien todos los valores `broadcast::Sender`
+/// para los canales activos de pub/sub.
+/// 
 ///
-/// `Db` contains a `HashMap` storing the key/value data and all
-/// `broadcast::Sender` values for active pub/sub channels.
-///
+/// 
+/// 
+/// 
+/// 
+/// 
 /// A `Db` instance is a handle to shared state. Cloning `Db` is shallow and
 /// only incurs an atomic ref count increment.
 ///
@@ -29,7 +36,7 @@ pub(crate) struct DbDropGuard {
 /// runs until all instances of `Db` are dropped, at which point the task
 /// terminates.
 #[derive(Debug, Clone)]
-pub(crate) struct Db {
+pub struct Db {
     /// Handle to shared state. The background task will also have an
     /// `Arc<Shared>`.
     shared: Arc<Shared>,
@@ -107,7 +114,9 @@ impl DbDropGuard {
     /// Create a new `DbHolder`, wrapping a `Db` instance. When this is dropped
     /// the `Db`'s purge task will be shut down.
     pub(crate) fn new() -> DbDropGuard {
-        DbDropGuard { db: Db::new() }
+        DbDropGuard { 
+            db: Db::new() 
+        }
     }
 
     /// Get the shared database. Internally, this is an
