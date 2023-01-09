@@ -1,29 +1,19 @@
-//! A minimal (i.e. very incomplete) implementation of a Redis server and
-//! client.
-//!
-//! The purpose of this project is to provide a larger example of an
-//! asynchronous Rust project built with Tokio. Do not attempt to run this in
-//! production... seriously.
-//!
 //! # Layout
 //!
-//! The library is structured such that it can be used with guides. There are
-//! modules that are public that probably would not be public in a "real" redis
-//! client library.
+//! Los componentes principales son:
 //!
-//! The major components are:
+//! * `server`: Implementacion de un servidor Redis. Incluye una funcion simple
+//!   'run' que tiene como parametro un 'TcpListener' mediante el cual
+//!   aceptara conexiones de clientes.
 //!
-//! * `server`: Redis server implementation. Includes a single `run` function
-//!   that takes a `TcpListener` and starts accepting redis client connections.
+//! * `client`: La implementacion de un cliente asincrono Redis. Demuestar como
+//!   construir clientes con Tokio.
 //!
-//! * `client`: an asynchronous Redis client implementation. Demonstrates how to
-//!   build clients with Tokio.
+//! * `cmd`: Implementacion de los comandos redis soportados.
 //!
-//! * `cmd`: implementations of the supported Redis commands.
-//!
-//! * `frame`: represents a single Redis protocol frame. A frame is used as an
-//!   intermediate representation between a "command" and the byte
-//!   representation.
+//! * `frame`: Representa una trama simple del protocolo Redis. Una trama
+//!   es utilizada como una representacion intermedia entre un 'comandos
+//!   y su representacion en bytes.
 
 pub mod blocking_client;
 pub mod client;
@@ -52,25 +42,27 @@ pub use buffer::{buffer, Buffer};
 mod shutdown;
 use shutdown::Shutdown;
 
-/// Default port that a redis server listens on.
-///
-/// Used if no port is specified.
+/// Puerto por defecto por el que el servidor redis escuchara (se utilizara
+/// si no se especifica ninguno)
 pub const DEFAULT_PORT: u16 = 6379;
 
-/// Error returned by most functions.
-///
-/// When writing a real application, one might want to consider a specialized
-/// error handling crate or defining an error type as an `enum` of causes.
-/// However, for our example, using a boxed `std::error::Error` is sufficient.
-///
-/// For performance reasons, boxing is avoided in any hot path. For example, in
-/// `parse`, a custom error `enum` is defined. This is because the error is hit
-/// and handled during normal execution when a partial frame is received on a
-/// socket. `std::error::Error` is implemented for `parse::Error` which allows
-/// it to be converted to `Box<dyn std::error::Error>`.
+/// Error returnado por la mayoria de funciones.
+/// 
+/// Al escribir una aplicación real, es posible que desee considerar una crate
+/// de manejo de errores especializado o definir un tipo de error como 
+/// una "enumeración" de causas.
+/// 
+/// Sin embargo, para nuestro ejemplo, usar un Boxed `std::error::Error` 
+/// es suficiente.
+/// 
+/// Por motivos de rendimiento, se evita el boxing en cualquier ruta activa.
+/// Por ejemplo, en `parse`, se define un error personalizado `enum`.
+/// Esto se debe a que el error se detecta y maneja durante la ejecución
+/// normal cuando se recibe un marco parcial en un socket.
+/// 
+/// `std::error::Error` se implementa para `parse::Error`, 
+/// lo que permite convertirlo en `Box<dyn std::error::Error>`.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
-/// A specialized `Result` type for mini-redis operations.
-///
-/// This is defined as a convenience.
+/// Un tipo 'Result' especializado para las operaciones Redis.
 pub type Result<T> = std::result::Result<T, Error>;
