@@ -1,0 +1,13 @@
+
+
+load("@rules_rust//proto:toolchain.bzl", "GRPC_COMPILE_DEPS")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+
+rust_binary(
+    name = "server",
+    edition = "2021",
+    srcs = ["src/main.rs"],
+    deps = [
+        "//proto:helloworld_rust_grpc",
+    ] + GRPC_COMPILE_DEPS,
+)

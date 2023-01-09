@@ -1,0 +1,20 @@
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@rules_rust//proto:proto.bzl", "rust_grpc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "common_proto",
+    srcs = ["common.proto"],
+)
+
+proto_library(
+    name = "helloworld_rust_proto",
+    srcs = ["helloworld.proto"],
+    deps = ["//proto:common_proto"],
+)
+
+rust_grpc_library(
+    name = "helloworld_rust_grpc",
+    deps = [":helloworld_rust_proto"],
+)

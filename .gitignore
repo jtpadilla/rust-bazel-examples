@@ -1,0 +1,7 @@
+**/*.rs.bk
+bazel-*
+.ijwb
+.clwb
+.idea
+.project
+.~*

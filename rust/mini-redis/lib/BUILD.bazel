@@ -1,0 +1,43 @@
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+rust_library(
+    name = "lib",
+    edition = "2021",
+    crate_name = "mini_redis",
+    srcs = [
+        "src/blocking_client.rs",
+        "src/buffer.rs",
+        "src/client.rs",
+        "src/connection.rs",
+        "src/db.rs",
+        "src/frame.rs",
+        "src/lib.rs",
+        "src/parse.rs",
+        "src/server.rs",
+        "src/shutdown.rs",
+        "src/cmd/get.rs",
+        "src/cmd/mod.rs",
+        "src/cmd/ping.rs",
+        "src/cmd/publish.rs",
+        "src/cmd/set.rs",
+        "src/cmd/subscribe.rs",
+        "src/cmd/unknown.rs",
+    ],
+    deps = [
+        "@crate_index//:mockall",
+        "@crate_index//:tokio",
+        "@crate_index//:bytes",
+        "@crate_index//:async-stream",
+        "@crate_index//:atoi",
+        "@crate_index//:rand",
+        "@crate_index//:tokio-stream",
+        "@crate_index//:tracing",
+        "@crate_index//:tracing-futures",
+        "@crate_index//:tracing-subscriber",
+    ],
+    proc_macro_deps = [
+        "@crate_index//:async-trait",
+    ],
+)
