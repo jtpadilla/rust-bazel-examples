@@ -3,7 +3,7 @@ load("@rules_rust//rust:defs.bzl", "rust_binary")
 rust_binary(
     edition = "2021",
     name = "client",
-    srcs = ["src/main.rs"],
+    srcs = glob(["src/**/*.rs"]),
     deps = [
         "//rust/mini-redis/lib",
         "@crate_index//:tokio",
