@@ -186,6 +186,9 @@ impl Db {
         // proteccion del bloqueo cada operacion 'set' tiene garantizado un Id unico.
         state.next_id += 1;
 
+        // El principio se supondra que no hay que enviar notificacion a la tarea 
+        // que gestiona las expiraciones.
+        let mut notify = false;
 
 
         // If this `set` becomes the key that expires **next**, the background
@@ -193,8 +196,6 @@ impl Db {
         //
         // Whether or not the task needs to be notified is computed during the
         // `set` routine.
-        let mut notify = false;
-
 
 
         let expires_at = expire.map(|duration| {
@@ -218,7 +219,9 @@ impl Db {
 
         });
 
-        // Insert the entry into the `HashMap`.
+        // Se asigna la clave el nuevo valor en el HashMap principal.
+        // Si para esta misma clave habia un valor anterior, este se
+        // obtendra como resultado de la ejecucion.
         let prev = state.entries.insert(
             key,
             Entry {
@@ -228,9 +231,9 @@ impl Db {
             },
         );
 
-        // If there was a value previously associated with the key **and** it
-        // had an expiration time. The associated entry in the `expirations` map
-        // must also be removed. This avoids leaking data.
+        // Si previamente habia un valor asociado a la clave y ese valor tenia
+        // definida una expiracion entonces hay que aliminar la correpondiente
+        // entrada de mapa de expiraciones.
         if let Some(prev) = prev {
             if let Some(when) = prev.expires_at {
                 // clear expiration
@@ -238,9 +241,10 @@ impl Db {
             }
         }
 
-        // Release the mutex before notifying the background task. This helps
-        // reduce contention by avoiding the background task waking up only to
-        // be unable to acquire the mutex due to this function still holding it.
+        // Se liberta el mutex antes de notificar la tarea en segundo plano. 
+        // Esto ayuda a reducir la contención al evitar que la tarea en segundo 
+        // plano se active y no pueda adquirir el mutex debido a que esta función 
+        // aún lo retiene.
         drop(state);
 
         if notify {
@@ -248,6 +252,7 @@ impl Db {
             // its state to reflect a new expiration.
             self.shared.background_task.notify_one();
         }
+        
     }
 
     /// Returns a `Receiver` for the requested channel.
