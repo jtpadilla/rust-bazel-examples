@@ -252,19 +252,19 @@ impl Db {
 
     }
 
-    /// Returns a `Receiver` for the requested channel.
-    ///
-    /// The returned `Receiver` is used to receive values broadcast by `PUBLISH`
-    /// commands.
+    /// Retorna un 'tokio::sync::broadcast::Receiver' para el canal requerido.
+    /// 
+    /// El 'Receiver' recibido se puede utilizar para recibir valores difundidos
+    /// por los comandos 'PUBLISH'.
     pub(crate) fn subscribe(&self, key: String) -> broadcast::Receiver<Bytes> {
         use std::collections::hash_map::Entry;
 
-        // Acquire the mutex
+        // Se adquiere el bloqueo
         let mut state = self.shared.state.lock().unwrap();
 
-        // If there is no entry for the requested channel, then create a new
-        // broadcast channel and associate it with the key. If one already
-        // exists, return an associated receiver.
+        // Si no hay una entrada para el canal requerido, entonces se crea un 
+        // nuevo canal de difusion y se asocia con el cvanal.
+        // En caso de que si existe, se retirna el 'Receiver' asociado a el.
         match state.pub_sub.entry(key) {
             Entry::Occupied(e) => e.get().subscribe(),
             Entry::Vacant(e) => {
