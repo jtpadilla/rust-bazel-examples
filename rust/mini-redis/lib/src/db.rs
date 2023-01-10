@@ -204,7 +204,7 @@ impl Db {
             let notify = state
                 .next_expiration()
                 .map(|expiration| expiration > when)
-                .unwrap_or(true);
+                .unwrap();
 
             // Track the expiration.
             state.expirations.insert((when, id), key.clone());
