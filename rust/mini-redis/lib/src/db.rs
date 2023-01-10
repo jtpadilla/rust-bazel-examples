@@ -190,14 +190,12 @@ impl Db {
         // que gestiona las expiraciones.
         let mut notify = false;
 
-
-        // If this `set` becomes the key that expires **next**, the background
-        // task needs to be notified so it can update its state.
+        // En caso de que se haya especificado una duracion para la expiracion 
+        // del valor, se convierte este duracion en el momento exacto de 
+        // la expiracion.
         //
-        // Whether or not the task needs to be notified is computed during the
-        // `set` routine.
-
-
+        // Pero esta conversion se aprovecha para realizar mas tareas
+        // necesarias para el funcionamiento de la expiracion.
         let expires_at = expire.map(|duration| {
 
             // Se calcula cuando la clave expirara.
@@ -252,7 +250,7 @@ impl Db {
             // its state to reflect a new expiration.
             self.shared.background_task.notify_one();
         }
-        
+
     }
 
     /// Returns a `Receiver` for the requested channel.
