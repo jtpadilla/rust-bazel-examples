@@ -18,109 +18,102 @@ pub struct DbDropGuard {
 
 /// Estado del servidor comportido con todas las conexiones.
 /// 
-/// 'Db' contiene en su interior un 'HashMap' que almacenando
+/// 'Db' contiene en su interior las estructuras de datos que almacenando
 /// los key/value y tambien todos los valores `broadcast::Sender`
 /// para los canales activos de pub/sub.
 /// 
-///
+/// En primera instancia contiene un Arc 'Atomically Reference Counted' para 
+/// poder compartir con el resto de threads estos datos.
 /// 
-/// 
-/// 
-/// 
-/// 
-/// A `Db` instance is a handle to shared state. Cloning `Db` is shallow and
-/// only incurs an atomic ref count increment.
-///
-/// When a `Db` value is created, a background task is spawned. This task is
-/// used to expire values after the requested duration has elapsed. The task
-/// runs until all instances of `Db` are dropped, at which point the task
-/// terminates.
+/// Cuando un 'Db' es creado la lanza tambien una tarea. Esta tarea es 
+/// utilizada para gestionar la expiracion de los valores. La tarea funcionara 
+/// hasta que todas las instancias de 'Db' son borradas, momento en el que
+/// terminara.
 #[derive(Debug, Clone)]
 pub struct Db {
-    /// Handle to shared state. The background task will also have an
-    /// `Arc<Shared>`.
+    /// Gestiona el estado compartido. La tarea secundaria que gestiona 
+    /// las expiraciones tambien poseera un `Arc<Shared>`.
     shared: Arc<Shared>,
 }
 
 #[derive(Debug)]
 struct Shared {
-    /// The shared state is guarded by a mutex. This is a `std::sync::Mutex` and
-    /// not a Tokio mutex. This is because there are no asynchronous operations
-    /// being performed while holding the mutex. Additionally, the critical
-    /// sections are very small.
-    ///
-    /// A Tokio mutex is mostly intended to be used when locks need to be held
-    /// across `.await` yield points. All other cases are **usually** best
-    /// served by a std mutex. If the critical section does not include any
-    /// async operations but is long (CPU intensive or performing blocking
-    /// operations), then the entire operation, including waiting for the mutex,
-    /// is considered a "blocking" operation and `tokio::task::spawn_blocking`
-    /// should be used.
+    /// El estado compartido es custodiado por un mutex. Este es un `std::sync::Mutex`
+    /// standar y no se utiliza la version del mutex de Tokio.
+    /// Esto es asi porque no se estan realizando operaciones asincronas mientras 
+    /// se mantiene ocupado el mutex. Ademas la seccion critica es muy pequeña.
+    /// 
+    /// Un Tokio mutex está diseñado principalmente para usarse cuando los bloqueos 
+    /// deben mantenerse en los puntos de cesion `.await`. Por lo general, todos 
+    /// los demás casos se atienden mejor con un mutex estándar.
+    /// 
+    /// Si la sección crítica no incluye ninguna operación asíncrona pero es larga 
+    /// (uso intensivo de la CPU o realiza operaciones de bloqueo), entonces toda 
+    /// la operación, incluida la espera del mutex, se considera una operación 
+    /// de "bloqueo" y `tokio::task::spawn_blocking` debería ser usado.
+    /// 
     state: Mutex<State>,
 
-    /// Notifies the background task handling entry expiration. The background
-    /// task waits on this to be notified, then checks for expired values or the
-    /// shutdown signal.
+    /// Notifica el vencimiento de la entrada de manejo de tareas en segundo plano.
+    /// La tarea en segundo plano espera a que se notifique esto, luego verifica 
+    /// los valores caducados o la señal de parada.
     background_task: Notify,
 }
 
 #[derive(Debug)]
 struct State {
-    /// The key-value data. We are not trying to do anything fancy so a
-    /// `std::collections::HashMap` works fine.
+    // Key/Value: Utilizamos un `std::collections::HashMap`.
     entries: HashMap<String, Entry>,
 
-    /// The pub/sub key-space. Redis uses a **separate** key space for key-value
-    /// and pub/sub. `mini-redis` handles this by using a separate `HashMap`.
+    /// Se utiliza un espacio separado para el key/value y el pub/sub. Tambien se
+    /// utiliza un `std::collections::HashMap`.
     pub_sub: HashMap<String, broadcast::Sender<Bytes>>,
 
-    /// Tracks key TTLs.
-    ///
-    /// A `BTreeMap` is used to maintain expirations sorted by when they expire.
-    /// This allows the background task to iterate this map to find the value
-    /// expiring next.
-    ///
-    /// While highly unlikely, it is possible for more than one expiration to be
-    /// created for the same instant. Because of this, the `Instant` is
-    /// insufficient for the key. A unique expiration identifier (`u64`) is used
-    /// to break these ties.
+    /// Seguimiento de las claves TTLs
+    /// 
+    /// Un 'BTreeMap' se utiliza para mantener los vencimientos ordenados por 
+    /// fecha de vencimiento. Esto permite a la tarea secundaria iterar por 
+    /// este mapa para encontrar el siguiente valor que expira.
+    /// 
+    /// Aunque es poco probable, es posible que se crre un venciamiento para
+    /// el mismo instante. Por ese motivo, un 'Instant' es insuficiente como clave.
+    /// Un identificador unico 'u64' se utiliza para garantiza que la clave sea unica.
     expirations: BTreeMap<(Instant, u64), String>,
 
-    /// Identifier to use for the next expiration. Each expiration is associated
-    /// with a unique identifier. See above for why.
+    /// Identificador que se utilizara para la clave compuesta de la proxima expiracion.
     next_id: u64,
 
-    /// True when the Db instance is shutting down. This happens when all `Db`
-    /// values drop. Setting this to `true` signals to the background task to
-    /// exit.
+    /// 'True' si la istancia de la base de datos se esta deteniendo. Esto 
+    /// ocurre cuando todos los values de 'Db' han sido Drop. Asignando este
+    /// valor a 'true' se marca a la tarea secundaria para que se detenga.
     shutdown: bool,
 }
 
-/// Entry in the key-value store
+/// Entrada en el almacen Key/Value
 #[derive(Debug)]
 struct Entry {
-    /// Uniquely identifies this entry.
+    /// Identificador unico de la entrada.
     id: u64,
 
-    /// Stored data
+    /// Datos almazanados
     data: Bytes,
 
-    /// Instant at which the entry expires and should be removed from the
-    /// database.
+    /// Instante en el que la entrada expira y debe ser eliminada de la base de datos
     expires_at: Option<Instant>,
 }
 
 impl DbDropGuard {
-    /// Create a new `DbHolder`, wrapping a `Db` instance. When this is dropped
-    /// the `Db`'s purge task will be shut down.
+    /// Crea un nuevo 'DbDropGuard' que recubre a una instancia de 'Db'.
+    /// Este envoltorio permite realiza la purga de la Bd cuando esta instancia
+    /// es 'droped'.
     pub(crate) fn new() -> DbDropGuard {
         DbDropGuard { 
             db: Db::new() 
         }
     }
 
-    /// Get the shared database. Internally, this is an
-    /// `Arc`, so a clone only increments the ref count.
+    /// Obtiene el recurso compartido. Internamente es un 
+    /// 'Arc', asi que se incremete el contador de referencias.
     pub(crate) fn db(&self) -> Db {
         self.db.clone()
     }
@@ -128,15 +121,18 @@ impl DbDropGuard {
 
 impl Drop for DbDropGuard {
     fn drop(&mut self) {
-        // Signal the 'Db' instance to shut down the task that purges expired keys
+        // Marca la instancia de 'Db' para que se detenga la tarea que purga las 
+        // claves que han expirado.
         self.db.shutdown_purge_task();
     }
 }
 
 impl Db {
-    /// Create a new, empty, `Db` instance. Allocates shared state and spawns a
-    /// background task to manage key expiration.
+    /// Crea una nueva instancia de 'Db' que no contiene ninguna entrada. Tambien
+    /// crea la tarea que gestiona las expiraciones proporcionandole el primero
+    /// clon de la base de datos.
     pub(crate) fn new() -> Db {
+
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 entries: HashMap::new(),
@@ -148,37 +144,49 @@ impl Db {
             background_task: Notify::new(),
         });
 
-        // Start the background task.
+        // Inicial la tarea.
         tokio::spawn(purge_expired_tasks(shared.clone()));
 
-        Db { shared }
+        // Se instancia un 'Db'
+        Db { 
+            shared 
+        }
+
     }
 
-    /// Get the value associated with a key.
-    ///
-    /// Returns `None` if there is no value associated with the key. This may be
-    /// due to never having assigned a value to the key or a previously assigned
-    /// value expired.
+    /// Obtiene el valor asociado con una clave.
+    /// 
+    /// Retorna 'None' si no hay un valor asociado con la clave. 
+    /// Get the value associated with a key. Esto puede a que nunca de
+    /// le asigno un valor a la clave o a que el valor expiro.
     pub(crate) fn get(&self, key: &str) -> Option<Bytes> {
-        // Acquire the lock, get the entry and clone the value.
-        //
-        // Because data is stored using `Bytes`, a clone here is a shallow
-        // clone. Data is not copied.
+        // Se adquire el bloqueo
         let state = self.shared.state.lock().unwrap();
+
+        // Se lee la entrada y clona el valor.
+        //
+        // Como los datos estan almacenados utilizando 'Bytes', un clone 
+        // en este caso es un clonado superficial (los datos no se copias).
         state.entries.get(key).map(|entry| entry.data.clone())
     }
 
-    /// Set the value associated with a key along with an optional expiration
-    /// Duration.
-    ///
-    /// If a value is already associated with the key, it is removed.
+    /// Establece un valor asociado con una clave junto con un periodo de
+    /// vencimiento que es opcional.
+    /// 
+    /// Si ya hay un valor asociado con la clave, el nuevo valor substituira 
+    /// al anterior.
     pub(crate) fn set(&self, key: String, value: Bytes, expire: Option<Duration>) {
+        // Se adquire el bloqueo
         let mut state = self.shared.state.lock().unwrap();
 
-        // Get and increment the next insertion ID. Guarded by the lock, this
-        // ensures a unique identifier is associated with each `set` operation.
+        // El Id almacenado en el estado es el que se utilizara para esta operacion.
         let id = state.next_id;
+
+        // Se incremente el Id para proxima insercion. Gracias a la 
+        // proteccion del bloqueo cada operacion 'set' tiene garantizado un Id unico.
         state.next_id += 1;
+
+
 
         // If this `set` becomes the key that expires **next**, the background
         // task needs to be notified so it can update its state.
@@ -187,13 +195,16 @@ impl Db {
         // `set` routine.
         let mut notify = false;
 
+
+
         let expires_at = expire.map(|duration| {
-            // `Instant` at which the key expires.
+
+            // Se calcula cuando la clave expirara.
             let when = Instant::now() + duration;
 
-            // Only notify the worker task if the newly inserted expiration is the
-            // **next** key to evict. In this case, the worker needs to be woken up
-            // to update its state.
+            // Unicamente se notificara a la tarea de gestion de las expiraciones si
+            // la expiracion del nuevo valor que se esta estableciendo resulta
+            // ser la proxima expiracion a ejecutarse.
             notify = state
                 .next_expiration()
                 .map(|expiration| expiration > when)
@@ -201,7 +212,10 @@ impl Db {
 
             // Track the expiration.
             state.expirations.insert((when, id), key.clone());
+
+            // Se retorna el instante de la expiracion
             when
+
         });
 
         // Insert the entry into the `HashMap`.
@@ -349,6 +363,14 @@ impl Shared {
 }
 
 impl State {
+    /// Desde el mapa 'expiratons' (de tipo BTreeMap<(Instant, u64), String>) se
+    /// obtiene un iterador que estara ordenado de la clave.
+    /// Se hace avanzar el iterador a la primera posicion para obtener la primera clave
+    /// (que sera la clave con el instante mas bajo).
+    /// De esta clave que esta formada por una tupla extrae el primer campo que es 
+    /// el Instant.
+    /// En realidad retornara un Option<Instant> ya que el caso de que el iterador 
+    /// de las claves este vacio la expresion funcional retornara un 'Option.None'.
     fn next_expiration(&self) -> Option<Instant> {
         self.expirations
             .keys()
