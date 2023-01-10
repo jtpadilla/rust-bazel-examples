@@ -186,25 +186,22 @@ impl Db {
         // proteccion del bloqueo cada operacion 'set' tiene garantizado un Id unico.
         state.next_id += 1;
 
-        // El principio se supondra que no hay que enviar notificacion a la tarea 
-        // que gestiona las expiraciones.
-        let mut notify = false;
-
         // En caso de que se haya especificado una duracion para la expiracion 
         // del valor, se convierte este duracion en el momento exacto de 
         // la expiracion.
         //
-        // Pero esta conversion se aprovecha para realizar mas tareas
-        // necesarias para el funcionamiento de la expiracion.
-        let expires_at = expire.map(|duration| {
-
+        // Tambien se programa la expiracion en el mapa de expiraciones.
+        //
+        // En caso de que la nueva expiracion resulta ser la proxima a ejecutar
+        // se le enviara una notificacion a la tarea subyacente. 
+        let (notify, expires_at) = if expire.is_some() {
             // Se calcula cuando la clave expirara.
-            let when = Instant::now() + duration;
+            let when = Instant::now() + expire.unwrap();
 
             // Unicamente se notificara a la tarea de gestion de las expiraciones si
             // la expiracion del nuevo valor que se esta estableciendo resulta
             // ser la proxima expiracion a ejecutarse.
-            notify = state
+            let notify = state
                 .next_expiration()
                 .map(|expiration| expiration > when)
                 .unwrap_or(true);
@@ -212,10 +209,12 @@ impl Db {
             // Track the expiration.
             state.expirations.insert((when, id), key.clone());
 
-            // Se retorna el instante de la expiracion
-            when
+            // Resultado
+            (notify, Option::Some(when))
 
-        });
+        } else {
+            (false, Option::None)
+        };
 
         // Se asigna la clave el nuevo valor en el HashMap principal.
         // Si para esta misma clave habia un valor anterior, este se
