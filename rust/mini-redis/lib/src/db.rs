@@ -256,28 +256,29 @@ impl Db {
     /// 
     /// El 'Receiver' recibido se puede utilizar para recibir valores difundidos
     /// por los comandos 'PUBLISH'.
-    pub(crate) fn subscribe(&self, key: String) -> broadcast::Receiver<Bytes> {
+    pub fn subscribe(&self, key: String) -> broadcast::Receiver<Bytes> {
         use std::collections::hash_map::Entry;
 
         // Se adquiere el bloqueo
         let mut state = self.shared.state.lock().unwrap();
 
         // Si no hay una entrada para el canal requerido, entonces se crea un 
-        // nuevo canal de difusion y se asocia con el cvanal.
+        // nuevo canal de difusion y se asocia con el canal.
         // En caso de que si existe, se retirna el 'Receiver' asociado a el.
         match state.pub_sub.entry(key) {
             Entry::Occupied(e) => e.get().subscribe(),
             Entry::Vacant(e) => {
-                // No broadcast channel exists yet, so create one.
+                // No existe el canal de difusion, asi que se crea uno.
                 //
-                // The channel is created with a capacity of `1024` messages. A
-                // message is stored in the channel until **all** subscribers
-                // have seen it. This means that a slow subscriber could result
-                // in messages being held indefinitely.
+                // El canal es creado con la capacidad de 1024 mensajes. Un
+                // mensaje es almacenado en el canal hasta que TODOS los 
+                // subscriptores lo han recibido. Esto significa que 
+                // un subscriptor lento podria dejar mensajes almacenados
+                // indefinidamente.
                 //
-                // When the channel's capacity fills up, publishing will result
-                // in old messages being dropped. This prevents slow consumers
-                // from blocking the entire system.
+                // Cuando la capacidad del canal se llene, la publicación 
+                // dará como resultado que se eliminen los mensajes antiguos. 
+                // Esto evita que los consumidores lentos bloqueen todo el sistema.
                 let (tx, rx) = broadcast::channel(1024);
                 e.insert(tx);
                 rx
