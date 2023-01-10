@@ -245,8 +245,8 @@ impl Db {
         drop(state);
 
         if notify {
-            // Finally, only notify the background task if it needs to update
-            // its state to reflect a new expiration.
+            // Finalmente, solo se notifica a la tarea en segundo plano si necesita 
+            // actualizar su estado para reflejar un nuevo vencimiento.
             self.shared.background_task.notify_one();
         }
 
