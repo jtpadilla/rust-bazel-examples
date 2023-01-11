@@ -43,7 +43,7 @@ struct Shared {
     /// Esto es asi porque no se estan realizando operaciones asincronas mientras 
     /// se mantiene ocupado el mutex. Ademas la seccion critica es muy pequeña.
     /// 
-    /// Un Tokio mutex está diseñado principalmente para usarse cuando los bloqueos 
+    /// Un mutex Tokio está diseñado principalmente para usarse cuando los bloqueos 
     /// deben mantenerse en los puntos de cesion `.await`. Por lo general, todos 
     /// los demás casos se atienden mejor con un mutex estándar.
     /// 
@@ -75,7 +75,7 @@ struct State {
     /// fecha de vencimiento. Esto permite a la tarea secundaria iterar por 
     /// este mapa para encontrar el siguiente valor que expira.
     /// 
-    /// Aunque es poco probable, es posible que se crre un venciamiento para
+    /// Aunque es poco probable, es posible que se cere un venciamiento para
     /// el mismo instante. Por ese motivo, un 'Instant' es insuficiente como clave.
     /// Un identificador unico 'u64' se utiliza para garantiza que la clave sea unica.
     expirations: BTreeMap<(Instant, u64), String>,
@@ -83,7 +83,7 @@ struct State {
     /// Identificador que se utilizara para la clave compuesta de la proxima expiracion.
     next_id: u64,
 
-    /// 'True' si la istancia de la base de datos se esta deteniendo. Esto 
+    /// 'True' si la instancia de la base de datos se esta deteniendo. Esto 
     /// ocurre cuando todos los values de 'Db' han sido Drop. Asignando este
     /// valor a 'true' se marca a la tarea secundaria para que se detenga.
     shutdown: bool,
@@ -176,73 +176,77 @@ impl Db {
     /// Si ya hay un valor asociado con la clave, el nuevo valor substituira 
     /// al anterior.
     pub(crate) fn set(&self, key: String, value: Bytes, expire: Option<Duration>) {
-        // Se adquire el bloqueo
-        let mut state = self.shared.state.lock().unwrap();
+        let notify = {
+            // Se adquire el bloqueo
+            let mut state = self.shared.state.lock().unwrap();
 
-        // El Id almacenado en el estado es el que se utilizara para esta operacion.
-        let id = state.next_id;
+            // El Id almacenado en el estado es el que se utilizara para esta operacion.
+            let id = state.next_id;
 
-        // Se incremente el Id para proxima insercion. Gracias a la 
-        // proteccion del bloqueo cada operacion 'set' tiene garantizado un Id unico.
-        state.next_id += 1;
+            // Se incremente el Id para proxima insercion. Gracias a la 
+            // proteccion del bloqueo cada operacion 'set' tiene garantizado un Id unico.
+            state.next_id += 1;
 
-        // En caso de que se haya especificado una duracion para la expiracion 
-        // del valor, se convierte este duracion en el momento exacto de 
-        // la expiracion.
-        //
-        // Tambien se programa la expiracion en el mapa de expiraciones.
-        //
-        // En caso de que la nueva expiracion resulta ser la proxima a ejecutar
-        // se le enviara una notificacion a la tarea subyacente. 
-        let (notify, expires_at) = if expire.is_some() {
-            // Se calcula cuando la clave expirara.
-            let when = Instant::now() + expire.unwrap();
+            // En caso de que se haya especificado una duracion para la expiracion 
+            // del valor, se convierte este duracion en el momento exacto de 
+            // la expiracion.
+            //
+            // Tambien se programa la expiracion en el mapa de expiraciones.
+            //
+            // En caso de que la nueva expiracion resulta ser la proxima a ejecutar
+            // se le enviara una notificacion a la tarea subyacente. 
+            let (notify, expires_at) = if expire.is_some() {
+                // Se calcula cuando la clave expirara.
+                let when = Instant::now() + expire.unwrap();
 
-            // Unicamente se notificara a la tarea de gestion de las expiraciones si
-            // la expiracion del nuevo valor que se esta estableciendo resulta
-            // ser la proxima expiracion a ejecutarse.
-            let notify = state
-                .next_expiration()
-                .map(|expiration| expiration > when)
-                .unwrap();
+                // Unicamente se notificara a la tarea de gestion de las expiraciones si
+                // la expiracion del nuevo valor que se esta estableciendo resulta
+                // ser la proxima expiracion a ejecutarse.
+                let notify = state
+                    .next_expiration()
+                    .map(|expiration| expiration > when)
+                    .unwrap();
 
-            // Track the expiration.
-            state.expirations.insert((when, id), key.clone());
+                // Track the expiration.
+                state.expirations.insert((when, id), key.clone());
 
-            // Resultado
-            (notify, Option::Some(when))
+                // Resultado
+                (notify, Option::Some(when))
 
-        } else {
-            (false, Option::None)
-        };
+            } else {
+                (false, Option::None)
+            };
 
-        // Se asigna la clave el nuevo valor en el HashMap principal.
-        // Si para esta misma clave habia un valor anterior, este se
-        // obtendra como resultado de la ejecucion.
-        let prev = state.entries.insert(
-            key,
-            Entry {
-                id,
-                data: value,
-                expires_at,
-            },
-        );
+            // Se asigna la clave el nuevo valor en el HashMap principal.
+            // Si para esta misma clave habia un valor anterior, este se
+            // obtendra como resultado de la ejecucion.
+            let prev = state.entries.insert(
+                key,
+                Entry {
+                    id,
+                    data: value,
+                    expires_at,
+                },
+            );
 
-        // Si previamente habia un valor asociado a la clave y ese valor tenia
-        // definida una expiracion entonces hay que aliminar la correpondiente
-        // entrada de mapa de expiraciones.
-        if let Some(prev) = prev {
-            if let Some(when) = prev.expires_at {
-                // clear expiration
-                state.expirations.remove(&(when, prev.id));
+            // Si previamente habia un valor asociado a la clave y ese valor tenia
+            // definida una expiracion entonces hay que aliminar la correpondiente
+            // entrada de mapa de expiraciones.
+            if let Some(prev) = prev {
+                if let Some(when) = prev.expires_at {
+                    // clear expiration
+                    state.expirations.remove(&(when, prev.id));
+                }
             }
-        }
 
-        // Se liberta el mutex antes de notificar la tarea en segundo plano. 
-        // Esto ayuda a reducir la contención al evitar que la tarea en segundo 
-        // plano se active y no pueda adquirir el mutex debido a que esta función 
-        // aún lo retiene.
-        drop(state);
+            // Se liberta el mutex antes de notificar la tarea en segundo plano. 
+            // Esto ayuda a reducir la contención al evitar que la tarea en segundo 
+            // plano se active y no pueda adquirir el mutex debido a que esta función 
+            // aún lo retiene.
+            //drop(state);
+
+            notify
+        };
 
         if notify {
             // Finalmente, solo se notifica a la tarea en segundo plano si necesita 
@@ -317,17 +321,20 @@ impl Db {
     /// Le envia la senyal a la tarea de shutdown. Esta funcion es llamada por la
     /// implementacion del trait 'Drop' de 'DbDropGuard'.
     fn shutdown_purge_task(&self) {
-        // Se adquiere el bloqueo
-        let mut state = self.shared.state.lock().unwrap();
 
-        // Se marca `State::shutdown` a `true`.
-        state.shutdown = true;
+        {
+            // Se adquiere el bloqueo
+            let mut state = self.shared.state.lock().unwrap();
 
-        // Se liberta el mutex antes de notificar la tarea en segundo plano. 
-        // Esto ayuda a reducir la contención al evitar que la tarea en segundo 
-        // plano se active y no pueda adquirir el mutex debido a que esta función 
-        // aún lo retiene.
-        drop(state);
+            // Se marca `State::shutdown` a `true`.
+            state.shutdown = true;
+
+            // Se liberta el mutex antes de notificar la tarea en segundo plano. 
+            // Esto ayuda a reducir la contención al evitar que la tarea en segundo 
+            // plano se active y no pueda adquirir el mutex debido a que esta función 
+            // aún lo retiene.
+            //drop(state);
+        }
 
         // Se le envia la notificacion a la tarea
         self.shared.background_task.notify_one();
