@@ -328,7 +328,7 @@ impl Db {
         // plano se active y no pueda adquirir el mutex debido a que esta función 
         // aún lo retiene.
         drop(state);
-        
+
         // Se le envia la notificacion a la tarea
         self.shared.background_task.notify_one();
 
@@ -336,14 +336,16 @@ impl Db {
 }
 
 impl Shared {
-    /// Purge all expired keys and return the `Instant` at which the **next**
-    /// key will expire. The background task will sleep until this instant.
+    /// Purga todas las claves que han expirado y retorna el `Instant` de la 
+    /// que sera la siguiente expiracion.
     fn purge_expired_keys(&self) -> Option<Instant> {
+        // Se adquiere el bloqueo
         let mut state = self.state.lock().unwrap();
 
         if state.shutdown {
-            // The database is shutting down. All handles to the shared state
-            // have dropped. The background task should exit.
+            // la base de datos se esta deteniendo.
+            // Todos los handlers del estado compartido seran borrados.
+            // La tarea en background se detendra.
             return None;
         }
 
@@ -354,17 +356,24 @@ impl Shared {
         // so we get a "real" mutable reference to `State` outside of the loop.
         let state = &mut *state;
 
-        // Find all keys scheduled to expire **before** now.
+        // Se buscaran todas las claves que han expirado ya.
         let now = Instant::now();
 
+        // Hay que tener en cuenta que el siguiente iterador entregara las entradas
+        // del hash ordenadas por su clave.
+        // Esto quiere decir que cuando la caducidad de la entrada sea posterior
+        // a la establecida, todas las restantes entradas seran posteriores y ya
+        // no es necesario continuiar avanzando la entrada.
         while let Some((&(when, id), key)) = state.expirations.iter().next() {
             if when > now {
-                // Done purging, `when` is the instant at which the next key
-                // expires. The worker task will wait until this instant.
+                // se ha terminado la purga, la entrada actual ya es posterior al instante
+                // definidi como limite y tambien es por tanto la proxima entrada
+                // que caducara.
+                // La tarea esperara hasta entonces.
                 return Some(when);
             }
 
-            // The key expired, remove it
+            // La clave ha expirado, se borra.
             state.entries.remove(key);
             state.expirations.remove(&(when, id));
         }
@@ -372,10 +381,9 @@ impl Shared {
         None
     }
 
-    /// Returns `true` if the database is shutting down
+    /// Retorna `true` si la base de datos esta parando.
     ///
-    /// The `shutdown` flag is set when all `Db` values have dropped, indicating
-    /// that the shared state can no longer be accessed.
+    /// De momento no hay ningun mecanismo que vacie el estado.
     fn is_shutdown(&self) -> bool {
         self.state.lock().unwrap().shutdown
     }
@@ -398,28 +406,25 @@ impl State {
     }
 }
 
-/// Routine executed by the background task.
+/// Tarea ejecutada en segundo plano.
 ///
-/// Wait to be notified. On notification, purge any expired keys from the shared
-/// state handle. If `shutdown` is set, terminate the task.
+/// La terea estara dormida esperando alguna notificacion.
 async fn purge_expired_tasks(shared: Arc<Shared>) {
-    // If the shutdown flag is set, then the task should exit.
+    // La tarea permanecera en un blucle hasta que se le notifique la parada
     while !shared.is_shutdown() {
-        // Purge all keys that are expired. The function returns the instant at
-        // which the **next** key will expire. The worker should wait until the
-        // instant has passed then purge again.
+        // Se borran las entradas expiradas y el resultado nos indicara para
+        // cuando es la siguiente caducidad.
         if let Some(when) = shared.purge_expired_keys() {
-            // Wait until the next key expires **or** until the background task
-            // is notified. If the task is notified, then it must reload its
-            // state as new keys have been set to expire early. This is done by
-            // looping.
+            // Hay que esperar los siguientes eventos:
+            //  1) Ha transcurrido el tiempo hasta la siguienet expiracion
+            //  2) Hemos recibido una notificacion general.
             tokio::select! {
                 _ = time::sleep_until(when) => {}
                 _ = shared.background_task.notified() => {}
             }
         } else {
-            // There are no keys expiring in the future. Wait until the task is
-            // notified.
+            // Como no hay previstas expiraciones unicamente esperamos 
+            // una notificacion general.
             shared.background_task.notified().await;
         }
     }
