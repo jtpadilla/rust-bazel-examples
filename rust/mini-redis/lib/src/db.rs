@@ -266,7 +266,12 @@ impl Db {
         // nuevo canal de difusion y se asocia con el canal.
         // En caso de que si existe, se retirna el 'Receiver' asociado a el.
         match state.pub_sub.entry(key) {
-            Entry::Occupied(e) => e.get().subscribe(),
+            Entry::Occupied(e) => {
+                // Para el canal indicado ya tenemos registrado un 'Sender'
+                // del que utilizaremos la funcion 'subscrive(&self)' para 
+                // clonar un nuevo 'tokio::sync::broadcast::Receiver'.
+                e.get().subscribe()
+            },
             Entry::Vacant(e) => {
                 // No existe el canal de difusion, asi que se crea uno.
                 //
@@ -280,42 +285,53 @@ impl Db {
                 // dará como resultado que se eliminen los mensajes antiguos. 
                 // Esto evita que los consumidores lentos bloqueen todo el sistema.
                 let (tx, rx) = broadcast::channel(1024);
+
+                // Se inserta en el mapa el 'tokio::sync::broadcast::Sender'
                 e.insert(tx);
+
+                // Y como resultado entregamos un 'tokio::sync::broadcast::Receiver'
                 rx
             }
         }
     }
 
-    /// Publish a message to the channel. Returns the number of subscribers
-    /// listening on the channel.
-    pub(crate) fn publish(&self, key: &str, value: Bytes) -> usize {
+    /// Publica un mensaje en el canal y retorna el numero de subscriptores
+    /// que hay en el momento del envio (no quiered decir que todos lo reciban)
+    pub fn publish(&self, key: &str, value: Bytes) -> usize {
+        // Se adquiere el bloqueo
         let state = self.shared.state.lock().unwrap();
 
+        // Se buscan el 'tokio::sync::broadcast::Sender' para el canal.
         state
             .pub_sub
             .get(key)
-            // On a successful message send on the broadcast channel, the number
-            // of subscribers is returned. An error indicates there are no
-            // receivers, in which case, `0` should be returned.
+            // Si se encuentra utilizamos el closure del '.map' para
+            // enviar el mensaje con el 'Sender' recuperado.
+            // Del Option resultante del envio retornamos el numero de subscriptores
+            // o un valor 0 se se produjo un error en el envio.
             .map(|tx| tx.send(value).unwrap_or(0))
-            // If there is no entry for the channel key, then there are no
-            // subscribers. In this case, return `0`.
+            // Si no existia en el mapa el canal, se retornaran 0 subscriptores
             .unwrap_or(0)
     }
 
-    /// Signals the purge background task to shut down. This is called by the
-    /// `DbShutdown`s `Drop` implementation.
+    /// Le envia la senyal a la tarea de shutdown. Esta funcion es llamada por la
+    /// implementacion del trait 'Drop' de 'DbDropGuard'.
     fn shutdown_purge_task(&self) {
-        // The background task must be signaled to shut down. This is done by
-        // setting `State::shutdown` to `true` and signalling the task.
+        // Se adquiere el bloqueo
         let mut state = self.shared.state.lock().unwrap();
+
+        // Se marca `State::shutdown` a `true`.
         state.shutdown = true;
 
-        // Drop the lock before signalling the background task. This helps
-        // reduce lock contention by ensuring the background task doesn't
-        // wake up only to be unable to acquire the mutex.
+        // Se liberta el mutex antes de notificar la tarea en segundo plano. 
+        // Esto ayuda a reducir la contención al evitar que la tarea en segundo 
+        // plano se active y no pueda adquirir el mutex debido a que esta función 
+        // aún lo retiene.
         drop(state);
+        
+        // Se le envia la notificacion a la tarea
         self.shared.background_task.notify_one();
+
     }
 }
 
