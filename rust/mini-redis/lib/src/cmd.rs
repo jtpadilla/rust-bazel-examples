@@ -18,9 +18,10 @@ pub use unknown::Unknown;
 
 use crate::{Connection, Db, Frame, Parse, ParseError, Shutdown};
 
-/// Enumeration of supported Redis commands.
+/// Enumeraciopn de los comandos Redis que son soportados.
 ///
-/// Methods called on `Command` are delegated to the command implementation.
+/// Metodos  llamados en 'Command' son delegados a la implementaciuon
+/// del comandos.
 #[derive(Debug)]
 pub enum Command {
     Get(Get),
@@ -33,29 +34,30 @@ pub enum Command {
 }
 
 impl Command {
-    /// Parse a command from a received frame.
-    ///
-    /// The `Frame` must represent a Redis command supported by `mini-redis` and
-    /// be the array variant.
-    ///
-    /// # Returns
-    ///
-    /// On success, the command value is returned, otherwise, `Err` is returned.
+    /// Parsea un comandos desde la trama que se ha recibido.
+    /// 
+    /// El 'Frame' debe representar un comanddo Redis que es soportado
+    /// por nuestro 'mini-redis'.
+    /// 
+    /// # Retorno
+    /// Si el resultado es satisfactorio, se retorna un 'Command' y
+    /// en caso de error se retorna un 'Err'.
     pub fn from_frame(frame: Frame) -> crate::Result<Command> {
-        // The frame  value is decorated with `Parse`. `Parse` provides a
-        // "cursor" like API which makes parsing the command easier.
+        // El valor de la trama es decorado con un `Parse`el cual
+        // proporciona una API tipo "cursor" el cual permite un 
+        // parseado mas sencillo.
         //
-        // The frame value must be an array variant. Any other frame variants
-        // result in an error being returned.
+        // El valor de la trame debe ser una variante de un erray. Cualquier 
+        // otra variante resultara en el retorno de un error.
         let mut parse = Parse::new(frame)?;
 
-        // All redis commands begin with the command name as a string. The name
-        // is read and converted to lower cases in order to do case sensitive
-        // matching.
+        // Todos los comandos redis empiezan con una string con 
+        // el nombre del comando. El nombre es leido y convertido a minisculas
+        // para podes establecer cual es el comando.
         let command_name = parse.next_string()?.to_lowercase();
 
-        // Match the command name, delegating the rest of the parsing to the
-        // specific command.
+        // Se busca la coincidencia del comando para delegar el resto del comando
+        // especificamente a cada comando.
         let command = match &command_name[..] {
             "get" => Command::Get(Get::parse_frames(&mut parse)?),
             "publish" => Command::Publish(Publish::parse_frames(&mut parse)?),
@@ -64,29 +66,28 @@ impl Command {
             "unsubscribe" => Command::Unsubscribe(Unsubscribe::parse_frames(&mut parse)?),
             "ping" => Command::Ping(Ping::parse_frames(&mut parse)?),
             _ => {
-                // The command is not recognized and an Unknown command is
-                // returned.
+                // Si el comando no es reconocido se retornara un
+                // comando Unknown ya que 
                 //
-                // `return` is called here to skip the `finish()` call below. As
-                // the command is not recognized, there is most likely
-                // unconsumed fields remaining in the `Parse` instance.
+                // Ademas se retorna ya sin esperar a que se ejecute
+                // el parse.finish().
                 return Ok(Command::Unknown(Unknown::new(command_name)));
             }
         };
 
-        // Check if there is any remaining unconsumed fields in the `Parse`
-        // value. If fields remain, this indicates an unexpected frame format
-        // and an error is returned.
+        // Verifica si quedan frame spendientes de consumer despues de invocar
+        // al parseado de cada comando. Si hay campos pendientes aunque el 
+        // parseado de comando haya resultado satisfactorio indicara que hay 
+        // mas campos de los permitidos y un error sera retornado.
         parse.finish()?;
 
-        // The command has been successfully parsed
+        // El comando ha sido parseado satisfactoriamente.
         Ok(command)
     }
 
-    /// Apply the command to the specified `Db` instance.
-    ///
-    /// The response is written to `dst`. This is called by the server in order
-    /// to execute a received command.
+    /// Aplica el comando a la base de datos.
+    /// 
+    /// La respuesta es escrita en `dst'. 
     pub(crate) async fn apply(
         self,
         db: &Db,
@@ -102,13 +103,13 @@ impl Command {
             Subscribe(cmd) => cmd.apply(db, dst, shutdown).await,
             Ping(cmd) => cmd.apply(dst).await,
             Unknown(cmd) => cmd.apply(dst).await,
-            // `Unsubscribe` cannot be applied. It may only be received from the
-            // context of a `Subscribe` command.
+            // `Unsubscribe` no puede ser aplicado, el es solo recibiso 
+            // desde el contexto de un comando 'Subscribe'.
             Unsubscribe(_) => Err("`Unsubscribe` is unsupported in this context".into()),
         }
     }
 
-    /// Returns the command name
+    /// Retorna el nombre del comando
     pub(crate) fn get_name(&self) -> &str {
         match self {
             Command::Get(_) => "get",
